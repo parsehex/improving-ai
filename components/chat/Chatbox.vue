@@ -17,7 +17,9 @@ import { useToast } from '@/components/ui/toast';
 import type { ChatMessage } from '@/lib/types';
 import Message from './ChatMessage.vue';
 import useChat from '@/composables/useChat';
-import { scrollToBottom } from '~/lib/utils';
+import { delay, scrollToBottom } from '~/lib/utils';
+import { complete } from '~/lib/llm';
+import { v4 } from 'uuid';
 
 const { toast } = useToast();
 
@@ -31,15 +33,13 @@ const sysIsOpen = ref(true);
 const apiPartialBody = ref({
 	temperature: 0.75,
 	seed: -1,
-	model: 'llama3.1:8b-instruct-q6_K',
 });
 
-const { messages, uiMessages, sysMessage, input, handleSubmit, setMessages, reload, isLoading, stop, canReload, canSend } =
+const { messages, uiMessages, sysMessage, input, handleSubmit, setMessages, reload, isLoading, isThinking, stop, canReload, canSend } =
 	useChat({
 		initialMessages: await initialMessages.value,
 		body: apiPartialBody.value,
 		onFinish: async () => {
-			// message finished streaming
 			console.timeEnd('message');
 		},
 		onError: (e: any) => {
@@ -50,13 +50,31 @@ const { messages, uiMessages, sysMessage, input, handleSubmit, setMessages, relo
 
 watch(() => messages.value.length, () => scrollToBottom());
 
+onMounted(() => {
+	// console.clear();
+});
+
 const doSubmit = async (e: Event) => {
 	if ((e as KeyboardEvent).shiftKey) return;
 	if (!canSend || input.value === '' || isLoading.value) return;
 	console.time('message');
 
-	handleSubmit(e);
+	const userMsg = {
+		id: v4(),
+		role: 'user',
+		content: input.value,
+	} as ChatMessage;
+	setMessages([...messages.value, userMsg]);
+	input.value = '';
+
+	await delay(10);
+
+	// await condWriteNewSysMessage();
+
+	handleSubmit(e, true);
 };
+
+const lastMessage = computed(() => messages.value[messages.value.length - 1]);
 </script>
 
 <template>
@@ -87,6 +105,7 @@ const doSubmit = async (e: Event) => {
 					v-for="m in uiMessages"
 					:key="m.id"
 					:message="m"
+					:isThinking="isThinking && m.id === lastMessage.id"
 				/>
 			</div>
 		</ScrollArea>

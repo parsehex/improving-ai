@@ -25,6 +25,7 @@ import { isDevMode, copyToClipboard } from '~/lib/utils';
 
 const props = defineProps<{
 	message: ChatMessage;
+	isThinking?: boolean;
 }>();
 const { message } = toRefs(props);
 
@@ -92,8 +93,11 @@ const doClearThread = async () => {
 						{{ message.role === 'user' ? userName : 'AI' }}
 					</CardHeader>
 					<CardContent class="p-3 pl-6 pt-0 flex items-center justify-between gap-2">
-						<div class="grow">
-							{{ message.content }}
+						<div class="grow flex items-center gap-2">
+							<Spinner v-if="isThinking" />
+							<span v-if="isThinking" class="italic text-gray-500"
+							>Thinking...</span>
+							<span>{{ message.content }}</span>
 						</div>
 					</CardContent>
 				</Card>

@@ -1,19 +1,16 @@
 import { ref, computed } from 'vue';
 import type {
 	ChatMessage,
+	ChatRequest,
+	UseChatOptions,
 } from '@/lib/types';
 import axios from 'axios';
 import { v4 } from 'uuid';
 
-interface UseChatOptions {
-	initialMessages?: ChatMessage[];
-	body?: Record<string, unknown>;
-	onFinish?: (messages: ChatMessage[]) => void;
-	onError?: (error: Error) => void;
-}
-
 export default function useChat(options: UseChatOptions) {
-	const BaseUrl = ref('');
+	const BaseUrl = ref(options.baseUrl || '/api/chat');
+	// const BaseUrl = ref(options.baseUrl || 'http://192.168.0.115:11434/v1/chat/completions');
+	const model = ref(options.model || 'llama3.1:8b-instruct-q6_K');
 
 	const origMessages = ref([] as ChatMessage[]);
 
@@ -22,6 +19,7 @@ export default function useChat(options: UseChatOptions) {
 	const sysMessage = computed(() => messages.value[0]);
 	const input = ref('');
 	const isLoading = ref(false);
+	const isThinking = ref(false);
 
 	let controller = new AbortController();
 
@@ -53,7 +51,10 @@ export default function useChat(options: UseChatOptions) {
 			role: 'assistant',
 			content: '',
 		} as ChatMessage);
-		messages.value.push(msg.value);
+		setMessages([
+			...messages.value.filter((m) => m.type !== 'thinking'),
+			msg.value
+		]);
 		await axios({
 			url: BaseUrl.value,
 			method: 'post',
@@ -63,30 +64,50 @@ export default function useChat(options: UseChatOptions) {
 			signal: controller.signal,
 			data: {
 				...options.body,
+				model: model.value,
 				stream: true,
 				messages: messages.value.filter((m) => m.id !== msg.value.id), // exclude the assistant message
-			},
+			} as ChatRequest,
 			onDownloadProgress: (progressEvent) => {
+				console.log('progressEvent:', progressEvent);
 				const xhr = progressEvent.event.target;
 				const { responseText } = xhr;
 				// responseText contains all chunks so far
-				const chunks = responseText.split('data:').map((c: string) => c.trim());
+				const splitStr = '0:'; // or data:
+				const chunks = responseText.split(splitStr).map((c: string) => c.trim());
 				let content = '';
 				let isLast = false;
-				for (const chunkStr of chunks) {
+				for (let chunkStr of chunks) {
 					if (!chunkStr) continue;
-					if (chunkStr.trim() === '[DONE]') {
+					chunkStr = chunkStr.trim();
+					if (chunkStr[0] === '"') {
+						chunkStr = chunkStr.slice(1);
+					}
+					if (chunkStr[chunkStr.length - 1] === '"') {
+						chunkStr = chunkStr.slice(0, -1);
+					}
+					if (chunkStr === '[DONE]') {
 						isLast = true;
 						break;
 					}
 
-					const chunk = JSON.parse(chunkStr);
-					content += chunk.choices[0].delta.content || '';
-
-					// does chunk have `usage` object?
-					if (chunk.usage) {
-						isLast = true;
+					if (chunkStr === '-thinking-') {
+						isThinking.value = true;
+						continue;
+					} else if (isThinking.value) {
+						isThinking.value = false;
 					}
+
+					// const chunk = JSON.parse(chunkStr);
+					// content += chunk.choices[0].delta.content || '';
+
+					// // does chunk have `usage` object?
+					// if (chunk.usage) {
+					// 	isLast = true;
+					// }
+
+					content += chunkStr;
+					console.log('chunkStr:', chunkStr);
 				}
 				msg.value.content = content;
 
@@ -141,9 +162,6 @@ export default function useChat(options: UseChatOptions) {
 	if (options.initialMessages) {
 		setMessages(options.initialMessages);
 	}
-	(async () => {
-		BaseUrl.value = 'http://192.168.0.115:11434/v1/chat/completions';
-	})();
 
 	return {
 		canSend,
@@ -156,6 +174,7 @@ export default function useChat(options: UseChatOptions) {
 		canReload,
 		reload,
 		isLoading,
+		isThinking,
 		stop,
 		append,
 	};

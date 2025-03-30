@@ -1,0 +1,84 @@
+import { sendStream } from 'h3'
+import OpenAI from "openai";
+import type { ChatRequest } from '@/lib/types';
+
+const openai = new OpenAI({
+	baseURL: 'http://192.168.0.115:11434/v1/',
+	apiKey: 'ollama',
+});
+
+const tools: any[] = [
+	{
+		type: 'function',
+		function: {
+			name: 'consider_response',
+			description: "Choose to think longer about a response. Do not use this for every response.",
+			paramters: [
+				// could have lookups for different info
+			],
+		}
+	},
+	// {
+	// 	type: 'function',
+	// 	function: {
+	// 		name: 'introspect',
+	// 		description: "Think about a response. Only use this when more deliberation is needed.",
+	// 		paramters: [
+	// 			// could have lookups for different info
+	// 		],
+	// 	}
+	// }
+];
+
+function toolCall(tool: any, req: any) {
+	console.log("Tool call", tool.function.name);
+}
+
+function readableStream(res: any, origReq: any) {
+	const stream = new ReadableStream({
+		async start(controller) {
+			for await (const chunk of res) {
+				const content = chunk.choices[0]?.delta?.content || '';
+				if (chunk.choices[0].delta?.tool_calls) {
+					controller.enqueue(`data:-thinking-\n`);
+					// TODO if tool call(s), send back status update and call tool
+					// i think when tools are used, we have to rerun after getting the result
+					// this stream needs to be reused right?
+					setTimeout(() => {
+						const tool = chunk.choices[0].delta.tool_calls[0];
+						toolCall(tool, origReq);
+					}, 15);
+					controller.close();
+					continue; // break?
+				}
+				content && controller.enqueue(`data:"${content}"\n`);
+			}
+			controller.enqueue("data:[DONE]");
+			controller.close();
+		},
+		cancel() {
+			console.log("Stream cancelled");
+		},
+	});
+	return stream;
+}
+
+export default defineEventHandler(async (event) => {
+	const body = await readBody(event);
+	const { model, messages, temperature, stream } = body as ChatRequest;
+	const toolsList = [...tools];
+	// if (messages.length === 2) {
+	// 	// system message and last should be user message
+	// 	toolsList.length = 0;
+	// }
+	const req: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
+		model,
+		messages,
+		temperature,
+		stream,
+		tools: toolsList,
+		tool_choice: 'auto'
+	};
+	const response = await openai.chat.completions.create(req);
+	return sendStream(event, readableStream(response, req));
+});

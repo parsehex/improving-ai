@@ -1,16 +1,10 @@
 <script setup lang="ts">
 import { Chatbox } from '@/components/chat';
-import type { ChatMessage } from '~/lib/types';
 
-const getInitialMessages = () => {
-	return [{
-		id: '1',
-		role: 'system',
-		content: 'The following is a chat between user and an assistant.',
-	} as ChatMessage];
-};
+const { data, status, error, refresh, clear } = await useFetch('/api/initial-messages');
+// console.log(data);
 </script>
 
 <template>
-	<Chatbox :initialMessages="getInitialMessages()" />
+	<Chatbox :initialMessages="data || []" />
 </template>
